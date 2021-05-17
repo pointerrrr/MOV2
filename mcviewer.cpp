@@ -121,7 +121,7 @@ BrickCacheLine BrickCache[BrickSetSize][Brick4Bytes / BrickSetSize];
 uint GetBrickIndexFromCache(int index)
 {
 	//return UINT32_MAX;
-	int set = index & (IndexSetSize - 1);
+	int set = index % (IndexSetSize);
 	auto cacheSet = IndexCache[set];
 	for (int i = 0; i < 32 * 128; i++)
 	{
@@ -135,7 +135,7 @@ uint GetBrickIndexFromCache(int index)
 
 void SetBrickIndexInCache(int index, uint result)
 {
-	int set = index & (IndexSetSize - 1);
+	int set = index % (IndexSetSize);
 	int rando = rand() % (Index4Bytes/IndexSetSize);
 	IndexCache[set][rando].idx = index;
 	IndexCache[set][rando].res = result;
@@ -143,7 +143,7 @@ void SetBrickIndexInCache(int index, uint result)
 
 int GetBrickFromCache(uchar buffer[512], uint index)
 {
-	int set = index & (BrickSetSize - 1);
+	int set = index % (BrickSetSize);
 
 	auto cacheSet = BrickCache[set];
 
@@ -164,15 +164,14 @@ int GetBrickFromCache(uchar buffer[512], uint index)
 
 void SetBrickInCache(uchar brick[512], int index)
 {
-	int set = index & (BrickSetSize - 1);
+	int set = index % (BrickSetSize);
 
-	int rando = rand() & (Brick4Bytes / BrickSetSize - 1);
+	int rando = rand() % (Brick4Bytes / BrickSetSize);
 	BrickCache[set][rando].idx = index;
 	for (int i = 0; i < 512; i++)
 	{
 		BrickCache[set][rando].bricks[i] = brick[i];
 	}
-
 }
 
 uint GetBrickIndex( int x, int y = 0, int z = 0 )
