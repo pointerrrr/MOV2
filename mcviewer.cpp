@@ -99,12 +99,14 @@ struct IndexCacheLine
 {
 	int idx;
 	uint res;
+	bool valid, dirty;
 };
 
 struct BrickCacheLine
 {
 	int idx;
 	uchar bricks[512];
+	bool valid, dirty;
 };
 
 #define IndexSetSize 256
