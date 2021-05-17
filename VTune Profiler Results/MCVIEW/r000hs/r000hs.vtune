@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+ <rdmgr>
+  <timestamp type="u64_t">1621245750</timestamp>
+  <hostname>DESKTOP-9FFS1GR</hostname>
+  <os>windows</os>
+  <product>Intel® oneAPI VTune™ Profiler 2021.2.0</product>
+  <buildNumber type="s32_t">615922</buildNumber>
+  <logicalCPUCount type="s32_t">8</logicalCPUCount>
+  <physicalCoreCount type="s32_t">4</physicalCoreCount>
+  <processorPackageCount type="s32_t">1</processorPackageCount>
+  <CPUFrequency type="s64_t">4200000000</CPUFrequency>
+  <CPUFamily type="s32_t">6</CPUFamily>
+  <CPUModel type="s32_t">158</CPUModel>
+  <CPUStepping type="s32_t">9</CPUStepping>
+  <CPUBrandName>Intel(R) Core(TM) i7-7700K CPU @ 4.20GHz</CPUBrandName>
+  <isa>avx2</isa>
+  <collectionTimeBegin type="u64_t">1621245750</collectionTimeBegin>
+  <collectionTimeEnd type="u64_t">1621245762</collectionTimeEnd>
+  <variables>
+   <at>hs</at>
+  </variables>
+ </rdmgr>
+</root>
