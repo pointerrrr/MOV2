@@ -1,11 +1,14 @@
 #include "precomp.h"
 #include "mcviewer.h"
-
+#include <stdio.h>
 #include <stdlib.h>
 #include <iostream>
-#include <stdio.h>
+
+using namespace std;
 
 Game* game = new MCViewer();
+
+
 
 /*
 Notes on the data structure used in this application:
@@ -74,6 +77,24 @@ Your task:
                                      "May the Light be with you!"
 */
 
+static int brickCount = 1024 * 1024 * 32; // all bricks are unique when we start
+static int deletedBricks = 0;
+static int blockFileCount = 256;
+static int startCell = 1;
+
+// =================================================================
+// VOXEL DATA INTERACTION
+// The five functions below interact with the raw voxel data.
+// Profiling indicates that disk i/o completely dominates runtime.
+// Fix this by preventing disk i/o: use a cache to meet the vast
+// majority of requests from a small amount of RAM.
+// Note that the code that requests data (OptimizeWorld) never
+// touches the same data twice. It does however exhibit a rather
+// predictable access pattern. Exploit the fact that reading
+// 4 bytes from a file takes just as long as e.g. 64 bytes. This is
+// conceptually very similar to how a CPU cache operates.
+// =================================================================
+
 struct IndexCacheLine
 {
 	int idx;
@@ -88,12 +109,6 @@ struct BrickCacheLine
 	bool valid, dirty;
 };
 
-static int brickCount = 1024 * 1024 * 32; // all bricks are unique when we start
-static int deletedBricks = 0;
-static int blockFileCount = 256;
-static int startCell = 1;
-
-
 #define IndexSetSize 256
 #define BrickSetSize 512
 
@@ -102,17 +117,6 @@ static int startCell = 1;
 
 IndexCacheLine IndexCache[IndexSetSize][Index4Bytes / IndexSetSize];
 BrickCacheLine BrickCache[BrickSetSize][Brick4Bytes / BrickSetSize];
-
-
-int EvictFromIndexCache()
-{
-	return rand() % (Index4Bytes / IndexSetSize);
-}
-
-int EvictFromBrickCache()
-{
-	return rand() % (Brick4Bytes / BrickSetSize);
-}
 
 uint GetBrickIndexFromCache(int index)
 {
@@ -129,52 +133,12 @@ uint GetBrickIndexFromCache(int index)
 	return UINT32_MAX;
 }
 
-
-void WriteBrickIndexFromCacheToDisk(int set, uint index)
-{
-	int tlidx = IndexCache[set][index].idx;
-	uint brickIdx = IndexCache[set][index].res;
-	// write the brick index for the specified location to the index file
-	FILE* indexFile = fopen("assets/index.bin", "r+b" /* open for updating */);
-	fseek(indexFile, tlidx * 4, SEEK_SET);
-	fwrite(&brickIdx, 1, 4, indexFile);
-	fclose(indexFile);
-}
-
-// SetBrickIndexInCache(place on disk in brickindex, place on disk in brickfiles)
 void SetBrickIndexInCache(int index, uint result)
 {
-	
 	int set = index % (IndexSetSize);
-	int rando = EvictFromIndexCache();
-	if (IndexCache[set][rando].dirty)
-		WriteBrickIndexFromCacheToDisk(set, rando);
+	int rando = rand() % (Index4Bytes/IndexSetSize);
 	IndexCache[set][rando].idx = index;
 	IndexCache[set][rando].res = result;
-}
-
-void WriteBrickIndexInCache(int index, uint result)
-{
-	int set = index % (IndexSetSize);
-	
-	for (int i = 0; i < IndexSetSize; i++)
-	{
-		if (IndexCache[set][i].idx == index)
-		{
-			IndexCache[set][i].res = result;
-			IndexCache[set][i].dirty = true;
-			return;
-		}
-	}
-
-	int rando = EvictFromIndexCache();
-
-	if (IndexCache[set][rando].dirty)
-		WriteBrickIndexFromCacheToDisk(set, rando);
-	IndexCache[set][rando].idx = index;
-	IndexCache[set][rando].res = result;
-	IndexCache[set][rando].dirty = true;
-
 }
 
 int GetBrickFromCache(uchar buffer[512], uint index)
@@ -198,51 +162,17 @@ int GetBrickFromCache(uchar buffer[512], uint index)
 	return -1;
 }
 
-void SetBrickInCache(uchar brick[512], uint index)
+void SetBrickInCache(uchar brick[512], int index)
 {
 	int set = index % (BrickSetSize);
 
-	int rando = EvictFromBrickCache();
+	int rando = rand() % (Brick4Bytes / BrickSetSize);
 	BrickCache[set][rando].idx = index;
 	for (int i = 0; i < 512; i++)
 	{
 		BrickCache[set][rando].bricks[i] = brick[i];
 	}
 }
-
-void WriteBrickToCache(uchar brick[512], uint index)
-{
-	int set = index % (BrickSetSize);
-
-	for (int i = 0; i < BrickSetSize; i++)
-	{
-		if (BrickCache[set][i].idx == index)
-		{
-			for (int j = 0; j < 512; j++)
-			{
-				BrickCache[set][i].bricks[j] = brick[j];
-			}
-			BrickCache[set][i].dirty = true;
-		}
-	}
-
-	int rando = EvictFromBrickCache();
-
-
-}
-
-// =================================================================
-// VOXEL DATA INTERACTION
-// The five functions below interact with the raw voxel data.
-// Profiling indicates that disk i/o completely dominates runtime.
-// Fix this by preventing disk i/o: use a cache to meet the vast
-// majority of requests from a small amount of RAM.
-// Note that the code that requests data (OptimizeWorld) never
-// touches the same data twice. It does however exhibit a rather
-// predictable access pattern. Exploit the fact that reading
-// 4 bytes from a file takes just as long as e.g. 64 bytes. This is
-// conceptually very similar to how a CPU cache operates.
-// =================================================================
 
 uint GetBrickIndex( int x, int y = 0, int z = 0 )
 {
@@ -255,6 +185,7 @@ uint GetBrickIndex( int x, int y = 0, int z = 0 )
 		// read the brick index for the specified voxel from the index file
 		FILE* indexFile = fopen("assets/index.bin", "rb");
 		fseek(indexFile, tlidx * 4, SEEK_SET);
+
 		fread(&brickIdx, 1, 4, indexFile);
 		fclose(indexFile);
 		SetBrickIndexInCache(tlidx, brickIdx);
@@ -266,8 +197,11 @@ void SetBrickIndex( int x, int y, int z, uint brickIdx )
 {
 	// calculate position of voxel in top level grid
 	int tlidx = x + z * 1024 + y * 1024 * 1024;
-
-	WriteBrickIndexInCache(tlidx, brickIdx);	
+	// write the brick index for the specified location to the index file
+	FILE* indexFile = fopen( "assets/index.bin", "r+b" /* open for updating */ );
+	fseek( indexFile, tlidx * 4, SEEK_SET );
+	fwrite( &brickIdx, 1, 4, indexFile );
+	fclose( indexFile );
 }
 
 void CopyBrick( uint dst, uint src )
@@ -319,6 +253,7 @@ uchar ReadVoxel( int x, int y, int z )
 		int localx = x & 7, localy = y & 7, localz = z & 7;
 		return brick[localx + localy * 8 + localz * 8 * 8];
 	}
+	
 }
 
 void WriteVoxel( int x, int y, int z, uchar v )
@@ -341,19 +276,7 @@ void WriteVoxel( int x, int y, int z, uchar v )
 	// write the voxel in the brick in the block file
 	int localx = x & 7, localy = y & 7, localz = z & 7;
 	int posInBrick = localx + localy * 8 + localz * 8 * 8;
-	FILE* r = fopen( blockFileName, "r+b" );
-	if (!r)
-	{
-		// we have too few block files available; create a new one
-		r = fopen( blockFileName, "wb" );
-		uchar emptyBrick[512];
-		memset( emptyBrick, 0, 512 );
-		for( int i = 0; i < 131072; i++ ) fwrite( emptyBrick, 1, 512, r );
-		fclose( r );
-		blockFileCount++;
-		// open the newly created file
-		r = fopen( blockFileName, "r+b" );
-	}
+	FILE* r = fopen( blockFileName, "rb" );
 	fseek( r, (brickIdx & 131071) * 512 + posInBrick, SEEK_SET );
 	fwrite( &v, 1, 1, r );
 	fclose( r );
@@ -424,8 +347,6 @@ void OptimizeWorld()
 	// optimize the full world, will take ages (well, 22 days on my system)
 	int optimized = 0, countdown = 256;
 	// scan the cells of the top-level grid for empty bricks
-	Timer timer;
-	
 	for (int b = startCell; b < 1024 * 32 * 1024; b++)
 	{
 		// iterate through the 64x32x64 regions
@@ -482,42 +403,6 @@ void OptimizeWorld()
 			fclose( f );
 			exit( 0 );
 		}
-		if ((b % 1024) == 0)
-		{
-			cout << timer.elapsed() << "\n";
-			timer.reset();
-		}
-	}
-}
-
-// MikadoWorld:
-// Draws a set of random lines in the disk-based copy of the world.
-// -----------------------------------------------------------------
-void MikadoWorld()
-{
-	for( int i = 0; i < 100; i++ )
-	{
-		// place the line in a 512 x 256 x 512 box
-	#if 1
-		int bx = 7200;
-		int bz = 7200;
-	#else
-		int bx = RandomUInt() % (8192 - 512);
-		int bz = RandomUInt() % (8192 - 512);
-	#endif
-		// actual line start and end
-		int x1 = bx + (RandomUInt() & 511), y1 = RandomUInt() & 255, z1 = bz + (RandomUInt() & 511);
-		int x2 = bx + (RandomUInt() & 511), y2 = RandomUInt() & 255, z2 = bz + (RandomUInt() & 511);
-		// draw line
-		printf( "Line: (%i,%i,%i) - (%i,%i,%i)... ", x1, y1, z1, x2, y2, z2 );
-		Timer t;
-		float l = (float)max( max( abs( x2 - x1 ), abs( y2 - y1 ) ), abs( z2 - z1 ) );
-		printf( "voxels: %i ", (int)l );
-		float dx = (x2 - x1) / l, dy = (y2 - y1) / l, dz = (z2 - z1) / l;
-		float x = (float)x1, y = (float)y1, z = (float)z1;
-		for( int i = 0; i < l; i++, x += dx, y += dy, z += dz )
-			WriteVoxel( (int)x, (int)y, (int)z, 7 << 5 );
-		printf( "%1.2fms.\n", t.elapsed() * 1000 );
 	}
 }
 
@@ -532,6 +417,13 @@ void MikadoWorld()
 // -----------------------------------------------------------------
 void MCViewer::Init()
 {
+	cout << Brick4Bytes / BrickSetSize << "\n";
+	for (int i = 0; i < 64; i++)
+	{
+		for (int j = 0; j < 32 * 128; j++)
+			IndexCache;
+	}
+
 	// initialize the world
 	ClearWorld();
 	// position the camera
@@ -547,9 +439,7 @@ void MCViewer::Init()
 		fclose( f );
 	}
 	// ENABLE ME FOR TESTING THE OPTIMIZATION FUNCTION:
-	OptimizeWorld();
-	// ENABLE ME FOR TESTING LINE DRAWING
-	//MikadoWorld();
+	// OptimizeWorld();
 }
 
 // Tick:
@@ -561,12 +451,13 @@ void MCViewer::Init()
 // -----------------------------------------------------------------
 void MCViewer::Tick( float deltaTime )
 {
+	static Timer timer;
+	timer.reset();
+	//timer.start();
 	// This function gets called once per frame by the template code.
 	const int firstx = 128, lastx = 896; // big slice
 	// visualize a slice of the landscape
 	static int x = firstx, y = 0, z = 380 /* same as x */, zstep = 4;
-	Timer timer;
-	timer.reset();
 	for (int i = 0; i < 1024; i++)
 	{
 		uchar v = ReadVoxel( x + 7292, y, z + 7292 );
