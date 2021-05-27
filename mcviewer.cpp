@@ -97,6 +97,9 @@ static int startCell = 1;
 static long int cacheChecks = 0;
 static long int cacheHits = 0;
 
+static long int brickChecks = 0;
+static long int brickHits = 0;
+
 #define IndexSetSize 256
 #define BrickSetSize 512
 
@@ -125,11 +128,11 @@ uint GetBrickIndexFromCache(int index)
 {
 	//return UINT32_MAX;
 	cacheChecks++;
-	int set = (index >> 4) % (IndexSetSize);
+	int set = index % (IndexSetSize);
 	auto cacheSet = IndexCache[set];
 	for (int i = 0; i < 32 * 128; i++)
 	{
-		if (cacheSet[i].idx == index)
+		if (cacheSet[i].valid && cacheSet[i].idx == index)
 		{
 			cacheHits++;
 			return cacheSet[i].res;
@@ -152,11 +155,11 @@ void WriteBrickIndexFromCacheToDisk(int set, int cacheIndex)
 // call only when placing clean data in cache
 void SetBrickIndexInCache(int index, uint result)
 {
-	int set = (index >> 4) % (IndexSetSize);
+	int set = index % (IndexSetSize);
 
 	for (int i = 0; i < Index4Bytes / IndexSetSize; i++)
 	{
-		if (IndexCache[set][i].idx == index)
+		if (IndexCache[set][i].valid && IndexCache[set][i].idx == index)
 		{
 			return;
 		}
@@ -174,11 +177,11 @@ void SetBrickIndexInCache(int index, uint result)
 void WriteBrickIndexInCache(int index, uint result)
 {
 	cacheChecks++;
-	int set = (index >> 4) % (IndexSetSize);
+	int set = index % (IndexSetSize);
 	
 	for (int i = 0; i < IndexSetSize; i++)
 	{
-		if (IndexCache[set][i].idx == index)
+		if (IndexCache[set][i].valid && IndexCache[set][i].idx == index)
 		{
 			IndexCache[set][i].res = result;
 			IndexCache[set][i].dirty = true;
@@ -215,20 +218,20 @@ void WriteBrickFromCacheToDisk(int set, int cacheIndex)
 
 int GetBrickFromCache(uchar buffer[512], uint index)
 {
-	cacheChecks++;
-	int set = (index >> 4) % (BrickSetSize);
+	brickChecks++;
+	int set = index % (BrickSetSize);
 
 	auto cacheSet = BrickCache[set];
 
 	for (int i = 0; i < Brick4Bytes / BrickSetSize; i++)
 	{
-		if (cacheSet[i].idx == index)
+		if (cacheSet[i].valid && cacheSet[i].idx == index)
 		{
 			for (int j = 0; j < 512; j++)
 			{
 				buffer[j] = cacheSet[i].bricks[j];
 			}
-			cacheHits++;
+			brickHits++;
 			return 1;
 		}
 	}
@@ -239,11 +242,11 @@ int GetBrickFromCache(uchar buffer[512], uint index)
 // call only when writing clean data to cache
 void SetBrickInCache(uchar brick[512], uint index)
 {
-	int set = (index >> 4) % (BrickSetSize);
+	int set = index % (BrickSetSize);
 
 	for (int i = 0; i < Brick4Bytes / BrickSetSize; i++)
 	{
-		if (BrickCache[set][i].idx == index)
+		if (BrickCache[set][i].valid && BrickCache[set][i].idx == index)
 			return;
 	}
 
@@ -263,19 +266,20 @@ void SetBrickInCache(uchar brick[512], uint index)
 
 void WriteBrickToCache(uchar brick[512], uint index)
 {
-	cacheChecks++;
-	int set = (index >> 4) % (BrickSetSize);
+	brickChecks++;
+	int set = index % (BrickSetSize);
 
 	for (int i = 0; i < Brick4Bytes / BrickSetSize; i++)
 	{
-		if (BrickCache[set][i].idx == index)
+		if ( BrickCache[set][i].idx == index)
 		{
 			for (int j = 0; j < 512; j++)
 			{
 				BrickCache[set][i].bricks[j] = brick[j];
 			}
 			BrickCache[set][i].dirty = true;
-			cacheHits++;
+			BrickCache[set][i].valid = true;
+			brickHits++;
 			return;
 		}
 	}
@@ -289,7 +293,6 @@ void WriteBrickToCache(uchar brick[512], uint index)
 	for (int i = 0; i < 512; i++)
 	{
 		BrickCache[set][rando].bricks[i] = brick[i];
-
 	}
 	BrickCache[set][rando].idx = index;
 	BrickCache[set][rando].dirty = true;
@@ -302,13 +305,13 @@ void FlushCaches()
 	for(int i = 0; i < IndexSetSize; i++)
 		for (int j = 0; j < Index4Bytes / IndexSetSize; j++)
 		{
-			if (IndexCache[i][j].dirty)
+			if (IndexCache[i][j].valid && IndexCache[i][j].dirty)
 				WriteBrickIndexFromCacheToDisk(i, j);
 		}
 	for (int i = 0; i < BrickSetSize; i++)
 		for (int j = 0; j < Brick4Bytes / BrickSetSize; j++)
 		{
-			if (BrickCache[i][j].dirty)
+			if (BrickCache[i][j].valid && BrickCache[i][j].dirty)
 				WriteBrickFromCacheToDisk(i, j);
 		}
 }
@@ -609,10 +612,13 @@ void OptimizeWorld()
 		}
 		if ((b % 1024) == 0)
 		{
-			cout << timer.elapsed() << "\n";
-			cout << "cache check " << cacheChecks << " cache hits " << cacheHits << " percent " << (float)cacheHits / float(cacheChecks) << "\n";
+			//cout << timer.elapsed() << "\n";
+			//cout << "cache check " << cacheChecks << " cache hits " << cacheHits << " percent " << (float)cacheHits / float(cacheChecks) << "\n";
+			//cout << "brick check " << brickChecks << " brick hits " << brickHits << " percent " << (float)brickHits / float(brickChecks) << "\n";
 			cacheHits = 0;
 			cacheChecks = 0;
+			brickChecks = 0;
+			brickHits = 0;
 			timer.reset();
 		}
 	}
