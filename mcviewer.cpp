@@ -598,6 +598,7 @@ void OptimizeWorld()
 		if (--countdown == 0)
 		{
 			printf( "removed %i of 256 bricks at b=%i; deleted bricks: %i\n", optimized, b, deletedBricks );
+			//cout << "removed " << optimized << " of 256 bricks at b=" << b << "; deleted bricks: " << deletedBricks << "\n";
 			optimized = 0, countdown = 256;
 		}
 		// graceful exit when ESC is pressed
@@ -671,6 +672,9 @@ void MikadoWorld()
 // -----------------------------------------------------------------
 void MCViewer::Init()
 {
+	//std::ofstream out("out.txt");
+	//std::streambuf* coutbuf = std::cout.rdbuf(); //save old buf
+	//std::cout.rdbuf(out.rdbuf()); //redirect std::cout to out.txt!
 	indexFile = fopen("assets/index.bin", "r+b" /* open for updating */);
 	// initialize the world
 	ClearWorld();
@@ -687,7 +691,8 @@ void MCViewer::Init()
 		fclose( f );
 	}
 	// ENABLE ME FOR TESTING THE OPTIMIZATION FUNCTION:
-	//OptimizeWorld();
+	OptimizeWorld();
+	FlushCaches();
 	// ENABLE ME FOR TESTING LINE DRAWING
 	//MikadoWorld();
 }
