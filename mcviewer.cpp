@@ -339,7 +339,8 @@ uint GetBrickIndex( int x, int y = 0, int z = 0 )
 	{
 		// read the brick index for the specified voxel from the index file
 		fseek(indexFile, tlidx * 4, SEEK_SET);
-		fread(&brickIdx, 1, 4 * PrefetchIndex, indexFile);
+		int maxRead = min(4 * PrefetchIndex, 256 * 131072 - 1);
+		fread(&brickIdx, 1, maxRead, indexFile);
 		for(int i = 0; i < PrefetchIndex; i++)
 			SetBrickIndexInCache(tlidx + i, brickIdx[i]);
 	}
@@ -364,17 +365,17 @@ void CopyBrick( uint dst, uint src )
 	
 	if (GetBrickFromCache(srcBrick, src) == -1)
 	{
-		uchar prefetchedBricks[512 * PrefetchBricks];
+		uchar prefetchedBricks[512];
 		char srcBinFile[128];
 		sprintf(srcBinFile, "assets/block%03i.bin", srcRegionIdx);
 		FILE* s = fopen(srcBinFile, "rb"); // TODO: will this work if they are the same? Probably yes.
 
-		int seekStart = max( (src & 131071) * 512 - PrefetchBricks, (uint)0 );
+		//int seekStart = max( (src % 131072) - PrefetchBricks, (uint)0 ) * 512;
 
-		fseek(s, seekStart, SEEK_SET);
+		fseek(s, (src % 131072) * 512, SEEK_SET);
 
-		int maxRead = min(512 * PrefetchBricks, (int)(131072 - src));
-		fread(srcBrick, 1, maxRead, s);
+		//int maxRead = min(PrefetchBricks, (int)(131072 - (src % 131072))) * 512;
+		fread(srcBrick, 1, 512, s);
 		fclose(s);
 	}
 	WriteBrickToCache(srcBrick, dst);
@@ -398,7 +399,7 @@ uchar ReadVoxel( int x, int y, int z )
 		FILE* r = fopen(blockFileName, "rb");
 		if (!r) return 0;
 		fseek(r, (brickIdx & 131071) * 512, SEEK_SET);
-		int maxRead = min(PrefetchBricks, (int)(  131072 - brickIdx)) * 512;
+		int maxRead = min(PrefetchBricks, (int)(  131072 - (brickIdx % 131072))) * 512;
 		fread(prefetchedBricks, 1, maxRead, r);
 		fclose(r);
 		// find the specified voxel in the brick
@@ -406,7 +407,7 @@ uchar ReadVoxel( int x, int y, int z )
 		for (int i = 0; i < PrefetchBricks; i++)
 		{
 			
-			if ((brickIdx & 131071) + 512 * i < 131072 * 512)
+			if ((brickIdx & 131071) + i < 131072)
 			{
 				for (int j = 0; j < 512; j++)
 					brickybrick[j] = prefetchedBricks[i * 512 + j];
@@ -503,11 +504,15 @@ bool BrickIsEmpty( int brickIdx )
 	{
 		uchar prefetchedBricks[512 * PrefetchBricks];
 		int srcRegionIdx = brickIdx / 131072;
+
+		if (srcRegionIdx > 0)
+			int w = 5;
+
 		char srcBinFile[128];
 		sprintf(srcBinFile, "assets/block%03i.bin", srcRegionIdx);
 		FILE* s = fopen(srcBinFile, "rb");
 		fseek(s, (brickIdx & 131071) * 512, SEEK_SET);
-		int maxRead = min(PrefetchBricks, (int)(131072 - brickIdx)) * 512;
+		int maxRead = min(PrefetchBricks, (int)(131072 - (brickIdx % 131072))) * 512;
 		fread(prefetchedBricks, 1, maxRead, s);
 		fclose(s);
 		
@@ -516,7 +521,7 @@ bool BrickIsEmpty( int brickIdx )
 		for (int i = 0; i < PrefetchBricks; i++)
 		{
 			
-			if ((brickIdx & 131071) + 512 * i < 131072 * 512)
+			if ((brickIdx & 131071) + i < 131072)
 			{
 				for (int j = 0; j < 512; j++)
 					brickybrick[j] = prefetchedBricks[i * 512 + j];
@@ -682,7 +687,7 @@ void MCViewer::Init()
 		fclose( f );
 	}
 	// ENABLE ME FOR TESTING THE OPTIMIZATION FUNCTION:
-	OptimizeWorld();
+	//OptimizeWorld();
 	// ENABLE ME FOR TESTING LINE DRAWING
 	//MikadoWorld();
 }
