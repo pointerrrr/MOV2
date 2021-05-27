@@ -423,6 +423,7 @@ uchar ReadVoxel( int x, int y, int z )
 	return brick[localx + localy * 8 + localz * 8 * 8];
 }
 
+// todo
 void WriteVoxel( int x, int y, int z, uchar v )
 {
 	// read the brick index from the index file
@@ -437,28 +438,36 @@ void WriteVoxel( int x, int y, int z, uchar v )
 		// we can now use this new brick index.
 	}
 	// find the block file that contains the specified brick
-	int blockIdx = brickIdx / 131072;
-	char blockFileName[128];
-	sprintf( blockFileName, "assets/block%03i.bin", blockIdx );
-	// write the voxel in the brick in the block file
+	uchar brick[512];
 	int localx = x & 7, localy = y & 7, localz = z & 7;
 	int posInBrick = localx + localy * 8 + localz * 8 * 8;
-	FILE* r = fopen( blockFileName, "r+b" );
-	if (!r)
+	if (GetBrickFromCache(brick, brickIdx) == -1)
 	{
-		// we have too few block files available; create a new one
-		r = fopen( blockFileName, "wb" );
-		uchar emptyBrick[512];
-		memset( emptyBrick, 0, 512 );
-		for( int i = 0; i < 131072; i++ ) fwrite( emptyBrick, 1, 512, r );
-		fclose( r );
-		blockFileCount++;
-		// open the newly created file
-		r = fopen( blockFileName, "r+b" );
+		int blockIdx = brickIdx / 131072;
+		char blockFileName[128];
+		sprintf(blockFileName, "assets/block%03i.bin", blockIdx);
+		// write the voxel in the brick in the block file
+		
+		FILE* r = fopen(blockFileName, "r+b");
+		if (!r)
+		{
+			// we have too few block files available; create a new one
+			r = fopen(blockFileName, "wb");
+			uchar emptyBrick[512];
+			memset(emptyBrick, 0, 512);
+			for (int i = 0; i < 131072; i++) fwrite(emptyBrick, 1, 512, r);
+			fclose(r);
+			blockFileCount++;
+			// open the newly created file
+			r = fopen(blockFileName, "r+b");
+		}
+		fseek(r, (brickIdx & 131071) * 512, SEEK_SET);
+		fread(brick, 1, 512, r);
+		fclose(r);
 	}
-	fseek( r, (brickIdx & 131071) * 512 + posInBrick, SEEK_SET );
-	fwrite( &v, 1, 1, r );
-	fclose( r );
+	brick[posInBrick] = v;
+	WriteBrickToCache(brick, brickIdx);
+	
 }
 
 // =================================================================
@@ -691,10 +700,11 @@ void MCViewer::Init()
 		fclose( f );
 	}
 	// ENABLE ME FOR TESTING THE OPTIMIZATION FUNCTION:
-	OptimizeWorld();
-	FlushCaches();
+	//OptimizeWorld();
+	
 	// ENABLE ME FOR TESTING LINE DRAWING
-	//MikadoWorld();
+	MikadoWorld();
+	FlushCaches();
 }
 
 // Tick:
@@ -709,7 +719,7 @@ void MCViewer::Tick( float deltaTime )
 	// This function gets called once per frame by the template code.
 	const int firstx = 128, lastx = 896; // big slice
 	// visualize a slice of the landscape
-	static int x = firstx, y = 0, z = 380 /* same as x */, zstep = 4;
+	static int x = firstx, y = 0, z = 380 /* same as x */, zstep = 1;
 	Timer timer;
 	timer.reset();
 	for (int i = 0; i < 1024; i++)
