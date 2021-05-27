@@ -103,7 +103,6 @@ static int startCell = 1;
 IndexCacheLine IndexCache[IndexSetSize][Index4Bytes / IndexSetSize];
 BrickCacheLine BrickCache[BrickSetSize][Brick4Bytes / BrickSetSize];
 
-
 int EvictFromIndexCache()
 {
 	return rand() % (Index4Bytes / IndexSetSize);
@@ -130,10 +129,10 @@ uint GetBrickIndexFromCache(int index)
 }
 
 
-void WriteBrickIndexFromCacheToDisk(int set, uint index)
+void WriteBrickIndexFromCacheToDisk(int set, int cacheIndex)
 {
-	int tlidx = IndexCache[set][index].idx;
-	uint brickIdx = IndexCache[set][index].res;
+	int tlidx = IndexCache[set][cacheIndex].idx;
+	uint brickIdx = IndexCache[set][cacheIndex].res;
 	// write the brick index for the specified location to the index file
 	FILE* indexFile = fopen("assets/index.bin", "r+b" /* open for updating */);
 	fseek(indexFile, tlidx * 4, SEEK_SET);
@@ -142,15 +141,17 @@ void WriteBrickIndexFromCacheToDisk(int set, uint index)
 }
 
 // SetBrickIndexInCache(place on disk in brickindex, place on disk in brickfiles)
+// call only when placing clean data in cache
 void SetBrickIndexInCache(int index, uint result)
 {
-	
 	int set = index % (IndexSetSize);
 	int rando = EvictFromIndexCache();
 	if (IndexCache[set][rando].dirty)
 		WriteBrickIndexFromCacheToDisk(set, rando);
 	IndexCache[set][rando].idx = index;
 	IndexCache[set][rando].res = result;
+	IndexCache[set][rando].valid = true;
+	IndexCache[set][rando].dirty = false;
 }
 
 void WriteBrickIndexInCache(int index, uint result)
@@ -174,7 +175,23 @@ void WriteBrickIndexInCache(int index, uint result)
 	IndexCache[set][rando].idx = index;
 	IndexCache[set][rando].res = result;
 	IndexCache[set][rando].dirty = true;
+	IndexCache[set][rando].valid = true;
+}
 
+void WriteBrickFromCacheToDisk(int set, int cacheIndex)
+{
+	uint index = BrickCache[set][cacheIndex].idx;
+	uchar brickData[512];
+	for (int i = 0; i < 512; i++)
+		brickData[i] = BrickCache[set][cacheIndex].bricks[i];
+
+	int dstRegionIdx = index / 131072;
+	char dstBinFile[128];
+	sprintf(dstBinFile, "assets/block%03i.bin", dstRegionIdx);
+	FILE* d = fopen(dstBinFile, "r+b" /* open for updating */);
+	fseek(d, (index& 131071) * 512, SEEK_SET);	
+	fwrite(brickData, 1, 512, d);
+	fclose(d);
 }
 
 int GetBrickFromCache(uchar buffer[512], uint index)
@@ -194,27 +211,33 @@ int GetBrickFromCache(uchar buffer[512], uint index)
 			return 1;
 		}
 	}
-
 	return -1;
 }
 
+// call only when writing clean data to cache
 void SetBrickInCache(uchar brick[512], uint index)
 {
 	int set = index % (BrickSetSize);
 
 	int rando = EvictFromBrickCache();
+
+	if (BrickCache[set][rando].dirty)
+		WriteBrickFromCacheToDisk(set, rando);
+
 	BrickCache[set][rando].idx = index;
 	for (int i = 0; i < 512; i++)
 	{
 		BrickCache[set][rando].bricks[i] = brick[i];
 	}
+	BrickCache[set][rando].valid = true;
+	BrickCache[set][rando].dirty = false;
 }
 
 void WriteBrickToCache(uchar brick[512], uint index)
 {
 	int set = index % (BrickSetSize);
 
-	for (int i = 0; i < BrickSetSize; i++)
+	for (int i = 0; i < Brick4Bytes / BrickSetSize; i++)
 	{
 		if (BrickCache[set][i].idx == index)
 		{
@@ -223,12 +246,41 @@ void WriteBrickToCache(uchar brick[512], uint index)
 				BrickCache[set][i].bricks[j] = brick[j];
 			}
 			BrickCache[set][i].dirty = true;
+			return;
 		}
 	}
 
 	int rando = EvictFromBrickCache();
 
+	if (BrickCache[set][rando].dirty)
+		WriteBrickFromCacheToDisk(set, rando);
 
+	
+	for (int i = 0; i < 512; i++)
+	{
+		BrickCache[set][rando].bricks[i] = brick[i];
+
+	}
+	BrickCache[set][rando].idx = index;
+	BrickCache[set][rando].dirty = true;
+	BrickCache[set][rando].valid = true;
+	
+}
+
+void FlushCaches()
+{
+	for(int i = 0; i < IndexSetSize; i++)
+		for (int j = 0; j < Index4Bytes / IndexSetSize; j++)
+		{
+			if (IndexCache[i][j].dirty)
+				WriteBrickIndexFromCacheToDisk(i, j);
+		}
+	for (int i = 0; i < BrickSetSize; i++)
+		for (int j = 0; j < Brick4Bytes / BrickSetSize; j++)
+		{
+			if (BrickCache[i][j].dirty)
+				WriteBrickFromCacheToDisk(i, j);
+		}
 }
 
 // =================================================================
@@ -274,19 +326,20 @@ void CopyBrick( uint dst, uint src )
 {
 	int srcRegionIdx = src / 131072;
 	int dstRegionIdx = dst / 131072;
-	char srcBinFile[128];
-	sprintf( srcBinFile, "assets/block%03i.bin", srcRegionIdx );
-	char dstBinFile[128];
-	sprintf( dstBinFile, "assets/block%03i.bin", dstRegionIdx );
-	FILE* s = fopen( srcBinFile, "rb" ); // TODO: will this work if they are the same? Probably yes.
-	FILE* d = fopen( dstBinFile, "r+b" /* open for updating */ );
-	fseek( s, (src & 131071) * 512, SEEK_SET );
-	fseek( d, (dst & 131071) * 512, SEEK_SET );
-	uchar brickData[512];
-	fread( brickData, 1, 512, s );
-	fwrite( brickData, 1, 512, d );
-	fclose( s );
-	fclose( d );
+
+	uchar dstBrick[512];
+	uchar srcBrick[512];
+	
+	if (GetBrickFromCache(srcBrick, src) == -1)
+	{
+		char srcBinFile[128];
+		sprintf(srcBinFile, "assets/block%03i.bin", srcRegionIdx);
+		FILE* s = fopen(srcBinFile, "rb"); // TODO: will this work if they are the same? Probably yes.
+		fseek(s, (src & 131071) * 512, SEEK_SET);
+		fread(srcBrick, 1, 512, s);
+		fclose(s);
+	}
+	WriteBrickToCache(srcBrick, dst);
 }
 
 uchar ReadVoxel( int x, int y, int z )
@@ -397,13 +450,18 @@ void GetBrickCoordinatesForIdx( const int idx, int& bx, int& by, int& bz )
 bool BrickIsEmpty( int brickIdx )
 {
 	uchar brick[512];
-	int srcRegionIdx = brickIdx / 131072;
-	char srcBinFile[128];
-	sprintf( srcBinFile, "assets/block%03i.bin", srcRegionIdx );
-	FILE* s = fopen( srcBinFile, "rb" );
-	fseek( s, (brickIdx & 131071) * 512, SEEK_SET );
-	fread( brick, 1, 512, s );
-	fclose( s );
+
+	if (GetBrickFromCache(brick, brickIdx) == -1)
+	{
+		int srcRegionIdx = brickIdx / 131072;
+		char srcBinFile[128];
+		sprintf(srcBinFile, "assets/block%03i.bin", srcRegionIdx);
+		FILE* s = fopen(srcBinFile, "rb");
+		fseek(s, (brickIdx & 131071) * 512, SEEK_SET);
+		fread(brick, 1, 512, s);
+		fclose(s);
+		SetBrickInCache(brick, brickIdx);
+	}
 	for (int i = 0; i < 512; i++) if (brick[i]) return false;
 	return true;
 }
@@ -480,6 +538,7 @@ void OptimizeWorld()
 			fwrite( &brickCount, 1, 4, f );
 			fwrite( &b, 1, 4, f );
 			fclose( f );
+			FlushCaches();
 			exit( 0 );
 		}
 		if ((b % 1024) == 0)
@@ -547,7 +606,7 @@ void MCViewer::Init()
 		fclose( f );
 	}
 	// ENABLE ME FOR TESTING THE OPTIMIZATION FUNCTION:
-	OptimizeWorld();
+	//OptimizeWorld();
 	// ENABLE ME FOR TESTING LINE DRAWING
 	//MikadoWorld();
 }
