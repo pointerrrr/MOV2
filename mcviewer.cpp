@@ -103,25 +103,33 @@ static long int brickHits = 0;
 #define IndexSetSize 256
 #define BrickSetSize 512
 
-#define Index4Bytes (262144 / 4)
-#define Brick4Bytes ((8388608 / 4) - Index4Bytes)
+#define IndexCacheSize (1024 * 1024)
+#define BrickCacheSize (8388608 - IndexCacheSize)
+
+// in bytes
+#define IndexCacheLineSize 8
+// in bytes
+#define BrickCacheLineSize 516
 
 #define PrefetchIndex 8
 #define PrefetchBricks 8
 
-IndexCacheLine IndexCache[IndexSetSize][Index4Bytes / IndexSetSize];
-BrickCacheLine BrickCache[BrickSetSize][Brick4Bytes / BrickSetSize];
+#define IndexCacheEntries (IndexCacheSize / IndexCacheLineSize)
+#define BrickCacheEntries (BrickCacheSize / BrickCacheLineSize)
+
+IndexCacheLine IndexCache[IndexSetSize][IndexCacheEntries / IndexSetSize];
+BrickCacheLine BrickCache[BrickSetSize][BrickCacheEntries / BrickSetSize];
 
 FILE* indexFile;
 
 int EvictFromIndexCache()
 {
-	return rand() % (Index4Bytes / IndexSetSize);
+	return rand() % (IndexCacheEntries / IndexSetSize);
 }
 
 int EvictFromBrickCache()
 {
-	return rand() % (Brick4Bytes / BrickSetSize);
+	return rand() % (BrickCacheEntries / BrickSetSize);
 }
 
 uint GetBrickIndexFromCache(int index)
@@ -157,7 +165,7 @@ void SetBrickIndexInCache(int index, uint result)
 {
 	int set = index % (IndexSetSize);
 
-	for (int i = 0; i < Index4Bytes / IndexSetSize; i++)
+	for (int i = 0; i < IndexCacheEntries / IndexSetSize; i++)
 	{
 		if (IndexCache[set][i].valid && IndexCache[set][i].idx == index)
 		{
@@ -223,7 +231,7 @@ int GetBrickFromCache(uchar buffer[512], uint index)
 
 	auto cacheSet = BrickCache[set];
 
-	for (int i = 0; i < Brick4Bytes / BrickSetSize; i++)
+	for (int i = 0; i < BrickCacheEntries / BrickSetSize; i++)
 	{
 		if (cacheSet[i].valid && cacheSet[i].idx == index)
 		{
@@ -244,7 +252,7 @@ void SetBrickInCache(uchar brick[512], uint index)
 {
 	int set = index % (BrickSetSize);
 
-	for (int i = 0; i < Brick4Bytes / BrickSetSize; i++)
+	for (int i = 0; i < BrickCacheEntries / BrickSetSize; i++)
 	{
 		if (BrickCache[set][i].valid && BrickCache[set][i].idx == index)
 			return;
@@ -269,7 +277,7 @@ void WriteBrickToCache(uchar brick[512], uint index)
 	brickChecks++;
 	int set = index % (BrickSetSize);
 
-	for (int i = 0; i < Brick4Bytes / BrickSetSize; i++)
+	for (int i = 0; i < BrickCacheEntries / BrickSetSize; i++)
 	{
 		if ( BrickCache[set][i].idx == index)
 		{
@@ -303,13 +311,13 @@ void WriteBrickToCache(uchar brick[512], uint index)
 void FlushCaches()
 {
 	for(int i = 0; i < IndexSetSize; i++)
-		for (int j = 0; j < Index4Bytes / IndexSetSize; j++)
+		for (int j = 0; j < IndexCacheEntries / IndexSetSize; j++)
 		{
 			if (IndexCache[i][j].valid && IndexCache[i][j].dirty)
 				WriteBrickIndexFromCacheToDisk(i, j);
 		}
 	for (int i = 0; i < BrickSetSize; i++)
-		for (int j = 0; j < Brick4Bytes / BrickSetSize; j++)
+		for (int j = 0; j < BrickCacheEntries / BrickSetSize; j++)
 		{
 			if (BrickCache[i][j].valid && BrickCache[i][j].dirty)
 				WriteBrickFromCacheToDisk(i, j);
