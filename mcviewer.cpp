@@ -372,32 +372,30 @@ void CopyBrick( uint dst, uint src )
 
 		//int seekStart = max( (src % 131072) - PrefetchBricks, (uint)0 ) * 512;
 
-		int seekStart = max(0, (int) (src % 131072) - (PrefetchBricks - 1) ) * 512;
+		int startIndex = max(0, (int)(src % 131072) - (PrefetchBricks - 1));
+		int endIndex = dst % 131072;
+		int seekStart = startIndex * 512;
 
 		fseek(s, seekStart, SEEK_SET);
 
 		//int maxRead = min(PrefetchBricks, (int)(131072 - (src % 131072))) * 512;
-		int maxRead = PrefetchBricks * 512;
+		int bricksRead = (endIndex - startIndex) + 1;
+		int maxRead = bricksRead * 512;
 		fread(prefetchedBricks, 1, maxRead, s);
 		fclose(s);
 
 		uchar brickybrick[512];
-		int bricksRead = min(PrefetchBricks, (int)(131072 - (src % 131072) )) - 1;
-		for (int i = 0; i < PrefetchBricks; i++)
+		for (int i = 0; i < bricksRead; i++)
 		{
-			if ((src & 131071) - bricksRead + i > 0 && (src % 131072) - bricksRead + i < 131072)
-			{
-				for (int j = 0; j < 512; j++)
+			for (int j = 0; j < 512; j++)
 					brickybrick[j] = prefetchedBricks[i * 512 + j];
 				
-				SetBrickInCache(brickybrick, (src - bricksRead) + i);
-			}
+			SetBrickInCache(brickybrick, startIndex + i);
 		}
 		for (int i = 0; i < 512; i++)
 		{
-			srcBrick[i] = prefetchedBricks[(bricksRead * 512) + i];
+			srcBrick[i] = prefetchedBricks[bricksRead - 1];
 		}
-
 	}
 	WriteBrickToCache(srcBrick, dst);
 }
