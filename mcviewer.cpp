@@ -100,8 +100,8 @@ static long int cacheHits = 0;
 static long int brickChecks = 0;
 static long int brickHits = 0;
 
-#define IndexSetSize 256
-#define BrickSetSize 512
+#define IndexSetSize 16
+#define BrickSetSize 32
 
 #define IndexCacheSize (1024 * 1024)
 #define BrickCacheSize (8388608 - IndexCacheSize)
