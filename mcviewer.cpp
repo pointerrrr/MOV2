@@ -365,18 +365,39 @@ void CopyBrick( uint dst, uint src )
 	
 	if (GetBrickFromCache(srcBrick, src) == -1)
 	{
-		uchar prefetchedBricks[512];
+		uchar prefetchedBricks[512 * PrefetchBricks];
 		char srcBinFile[128];
 		sprintf(srcBinFile, "assets/block%03i.bin", srcRegionIdx);
 		FILE* s = fopen(srcBinFile, "rb"); // TODO: will this work if they are the same? Probably yes.
 
 		//int seekStart = max( (src % 131072) - PrefetchBricks, (uint)0 ) * 512;
 
-		fseek(s, (src % 131072) * 512, SEEK_SET);
+		int seekStart = max(0, (int) (src % 131072) - (PrefetchBricks - 1) ) * 512;
+
+		fseek(s, seekStart, SEEK_SET);
 
 		//int maxRead = min(PrefetchBricks, (int)(131072 - (src % 131072))) * 512;
-		fread(srcBrick, 1, 512, s);
+		int maxRead = PrefetchBricks * 512;
+		fread(prefetchedBricks, 1, maxRead, s);
 		fclose(s);
+
+		uchar brickybrick[512];
+		int bricksRead = min(PrefetchBricks, (int)(131072 - (src % 131072) )) - 1;
+		for (int i = 0; i < PrefetchBricks; i++)
+		{
+			if ((src & 131071) - bricksRead + i > 0 && (src % 131072) - bricksRead + i < 131072)
+			{
+				for (int j = 0; j < 512; j++)
+					brickybrick[j] = prefetchedBricks[i * 512 + j];
+				
+				SetBrickInCache(brickybrick, (src - bricksRead) + i);
+			}
+		}
+		for (int i = 0; i < 512; i++)
+		{
+			srcBrick[i] = prefetchedBricks[(bricksRead * 512) + i];
+		}
+
 	}
 	WriteBrickToCache(srcBrick, dst);
 }
@@ -461,9 +482,28 @@ void WriteVoxel( int x, int y, int z, uchar v )
 			// open the newly created file
 			r = fopen(blockFileName, "r+b");
 		}
+
+		uchar prefetchedBricks[512 * PrefetchBricks];
+
 		fseek(r, (brickIdx & 131071) * 512, SEEK_SET);
-		fread(brick, 1, 512, r);
+		int maxRead = min(PrefetchBricks, (int)(131072 - (brickIdx % 131072))) * 512;
+		fread(prefetchedBricks, 1, maxRead, r);
 		fclose(r);
+		uchar brickybrick[512];
+		for (int i = 0; i < PrefetchBricks; i++)
+		{
+
+			if ((brickIdx & 131071) + i < 131072)
+			{
+				for (int j = 0; j < 512; j++)
+					brickybrick[j] = prefetchedBricks[i * 512 + j];
+				SetBrickInCache(brickybrick, brickIdx + i);
+			}
+		}
+		for (int i = 0; i < 512; i++)
+		{
+			brick[i] = prefetchedBricks[i];
+		}
 	}
 	brick[posInBrick] = v;
 	WriteBrickToCache(brick, brickIdx);
@@ -700,10 +740,10 @@ void MCViewer::Init()
 		fclose( f );
 	}
 	// ENABLE ME FOR TESTING THE OPTIMIZATION FUNCTION:
-	//OptimizeWorld();
+	OptimizeWorld();
 	
 	// ENABLE ME FOR TESTING LINE DRAWING
-	MikadoWorld();
+	//MikadoWorld();
 	FlushCaches();
 }
 
